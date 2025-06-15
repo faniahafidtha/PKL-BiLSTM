@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: pkl25-docker
+    name: pkl25-30
     env: docker
     plan: free
     region: oregon
