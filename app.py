@@ -108,6 +108,7 @@ display_option = st.radio("Pilih Tampilan", ("Tabel", "Grafik"))
 sector_key = list(sector_mapping.keys())[list(sector_mapping.values()).index(full_sector_name)]
 sector_data = combined_df[['Tahun', 'Satuan PLN/Provinsi', sector_key]]
 
+
 # --- Jika memilih Tabel ---
 if display_option == "Tabel":
     st.write(f"Data Sektor: {full_sector_name}")
@@ -119,10 +120,12 @@ if display_option == "Tabel":
     #sector_data = sector_data.rename(columns={sector_key: f'{full_sector_name} (GWh)'})
     #st.dataframe(sector_data)
     
-    # Salin dataframe agar tidak mengubah original
     table_df = sector_data.copy()
 
-    # Format hanya kolom konsumsi
+    # Konversi kolom Tahun jadi int biasa (hindari format 2,014)
+    table_df["Tahun"] = table_df["Tahun"].astype(int)
+
+    # Format nilai sektor
     table_df[sector_key] = table_df[sector_key].apply(lambda x: format_thousands_and_decimal_vectorized(np.array([x]))[0])
 
     # Rename kolom
