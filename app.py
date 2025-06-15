@@ -100,7 +100,11 @@ sector = st.sidebar.selectbox('Pilih Sektor', [sector_mapping[s] for s in sector
 # Menampilkan nama sektor yang lengkap menggunakan pemetaan
 full_sector_name = sector
 
-# Pilih tampilan antara Tabel atau Grafik
+# Pilih provinsi dari sidebar
+provinsi_list = combined_df['Satuan PLN/Provinsi'].unique()  # Ambil daftar provinsi yang tersedia
+provinsi = st.sidebar.selectbox('Pilih Satuan PLN/Provinsi', ['Semua Daerah'] + list(provinsi_list))  # Menambahkan pilihan untuk seluruh daerah
+
+# Menampilkan tampilan antara Tabel atau Grafik
 display_option = st.radio("Pilih Tampilan", ("Tabel", "Grafik"))
 
 # Tampilkan data sektor yang dipilih, termasuk kolom 'Satuan PLN/Provinsi'
@@ -108,30 +112,25 @@ display_option = st.radio("Pilih Tampilan", ("Tabel", "Grafik"))
 sector_key = list(sector_mapping.keys())[list(sector_mapping.values()).index(full_sector_name)]
 sector_data = combined_df[['Tahun', 'Satuan PLN/Provinsi', sector_key]]
 
+# --- Data untuk Provinsi yang dipilih ---
+if provinsi != 'Semua Daerah':
+    provinsi_data = combined_df[combined_df['Satuan PLN/Provinsi'] == provinsi]
+else:
+    provinsi_data = combined_df
 
 # --- Jika memilih Tabel ---
 if display_option == "Tabel":
     st.write(f"Data Sektor: {full_sector_name}")
     
+    # Tampilkan tabel prediksi berdasarkan sektor dan provinsi
+    table_df = provinsi_data[['Tahun', 'Satuan PLN/Provinsi', sector_key]].copy()
+
     # Format nilai untuk ribuan dan desimal
-    #sector_data[sector_key] = sector_data[sector_key].apply(lambda x: format_thousands_and_decimal_vectorized(np.array([x]))[0])
-    
-    # Tampilkan tabel dengan keterangan "GWh"
-    #sector_data = sector_data.rename(columns={sector_key: f'{full_sector_name} (GWh)'})
-    #st.dataframe(sector_data)
-    
-    table_df = sector_data.copy()
-
-    # Konversi kolom Tahun jadi int biasa (hindari format 2,014)
     table_df["Tahun"] = table_df["Tahun"].astype(str)
-
-    # Format nilai sektor
     table_df[sector_key] = table_df[sector_key].apply(lambda x: format_thousands_and_decimal_vectorized(np.array([x]))[0])
 
     # Rename kolom
     table_df = table_df.rename(columns={sector_key: f'{full_sector_name} (GWh)'})
-
-    # Tampilkan tabel
     st.dataframe(table_df)
 
 # --- Jika memilih Grafik ---
@@ -146,7 +145,14 @@ else:
 
     # --- Proses prediksi untuk sektor yang dipilih ---
     scaler = MinMaxScaler()
-    scaled_data = scaler.fit_transform(df_national[[sector_key]])
+    
+    # Jika memilih provinsi, hanya gunakan data provinsi tersebut
+    if provinsi != 'Semua Daerah':
+        data_to_use = provinsi_data
+    else:
+        data_to_use = df_national  # Gunakan data nasional jika 'Semua Daerah' dipilih
+
+    scaled_data = scaler.fit_transform(data_to_use[[sector_key]])
 
     # Persiapkan urutan data
     X, y = create_sequences(scaled_data, n_steps)
@@ -188,7 +194,7 @@ else:
     }
 
     # Evaluasi dengan kesalahan terukur
-    min_val, max_val = df_national[sector_key].min(), df_national[sector_key].max()
+    min_val, max_val = data_to_use[sector_key].min(), data_to_use[sector_key].max()
     range_val = max_val - min_val if max_val != min_val else 1
 
     mae = mean_absolute_error(actual, predicted) / range_val
@@ -214,7 +220,7 @@ else:
 
     plt.figure(figsize=(10, 6))
 
-    actual_years = df_national['Tahun'].values[n_steps:]
+    actual_years = data_to_use['Tahun'].values[n_steps:]
     future_years = predictions_bilstm_2030[sector_key]['future_years']
 
     actual = predictions_bilstm_2030[sector_key]['actual']
