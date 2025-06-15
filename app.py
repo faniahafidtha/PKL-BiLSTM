@@ -245,6 +245,7 @@ else:
         'Aktual (Gwh)': format_thousands_and_decimal_vectorized(actual),
         'Prediksi (Gwh)': format_thousands_and_decimal_vectorized(predicted)
     })
+    result_df['Tahun'] = result_df['Tahun'].astype(str)
 
     st.subheader(f"Tabel Prediksi Konsumsi Listrik Sektor: {full_sector_name}")
     st.write(result_df)
@@ -254,7 +255,7 @@ else:
         'Tahun': np.array(future_years).astype(int),
         'Prediksi Masa Depan (Gwh)': format_thousands_and_decimal_vectorized(future_preds)
     })
-
+    future_result_df['Tahun'] = future_result_df['Tahun'].astype(str)
 
     st.subheader(f"Tabel Prediksi Masa Depan (2025-2030) untuk Sektor: {full_sector_name} (Gwh)")
     st.write(future_result_df)
