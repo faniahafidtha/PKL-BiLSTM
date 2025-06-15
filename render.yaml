@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: konsumsi-listrik
+    name: konsumsi_listrik-25-30
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: streamlit run app.py --server.port=$PORT --server.enableCORS=false
