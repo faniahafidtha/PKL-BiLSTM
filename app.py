@@ -123,7 +123,7 @@ if display_option == "Tabel":
     table_df = sector_data.copy()
 
     # Konversi kolom Tahun jadi int biasa (hindari format 2,014)
-    table_df["Tahun"] = table_df["Tahun"].astype(int)
+    table_df["Tahun"] = table_df["Tahun"].astype(str)
 
     # Format nilai sektor
     table_df[sector_key] = table_df[sector_key].apply(lambda x: format_thousands_and_decimal_vectorized(np.array([x]))[0])
