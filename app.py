@@ -229,7 +229,7 @@ else:
 
     # Tampilkan tabel untuk data aktual dan prediksi
     result_df = pd.DataFrame({
-        'Tahun': actual_years,
+        'Tahun': actual_years.astype(int),
         'Aktual (Gwh)': format_thousands_and_decimal_vectorized(actual),
         'Prediksi (Gwh)': format_thousands_and_decimal_vectorized(predicted)
     })
@@ -239,9 +239,10 @@ else:
 
     # Tampilkan tabel untuk data aktual dan prediksi masa depan
     future_result_df = pd.DataFrame({
-        'Tahun': future_years,
+        'Tahun': np.array(future_years).astype(int),
         'Prediksi Masa Depan (Gwh)': format_thousands_and_decimal_vectorized(future_preds)
     })
+
 
     st.subheader(f"Tabel Prediksi Masa Depan (2025-2030) untuk Sektor: {full_sector_name} (Gwh)")
     st.write(future_result_df)
