@@ -113,11 +113,23 @@ if display_option == "Tabel":
     st.write(f"Data Sektor: {full_sector_name}")
     
     # Format nilai untuk ribuan dan desimal
-    sector_data[sector_key] = sector_data[sector_key].apply(lambda x: format_thousands_and_decimal_vectorized(np.array([x]))[0])
+    #sector_data[sector_key] = sector_data[sector_key].apply(lambda x: format_thousands_and_decimal_vectorized(np.array([x]))[0])
     
     # Tampilkan tabel dengan keterangan "GWh"
-    sector_data = sector_data.rename(columns={sector_key: f'{full_sector_name} (GWh)'})
-    st.dataframe(sector_data)
+    #sector_data = sector_data.rename(columns={sector_key: f'{full_sector_name} (GWh)'})
+    #st.dataframe(sector_data)
+    
+    # Salin dataframe agar tidak mengubah original
+    table_df = sector_data.copy()
+
+    # Format hanya kolom konsumsi
+    table_df[sector_key] = table_df[sector_key].apply(lambda x: format_thousands_and_decimal_vectorized(np.array([x]))[0])
+
+    # Rename kolom
+    table_df = table_df.rename(columns={sector_key: f'{full_sector_name} (GWh)'})
+
+    # Tampilkan tabel
+    st.dataframe(table_df)
 
 # --- Jika memilih Grafik ---
 else:
