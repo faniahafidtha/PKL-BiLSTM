@@ -264,7 +264,7 @@ else:
     evaluations_bilstm_2030[sector_key] = {
         'MAE': mae,
         'RMSE': rmse,
-        #'MAPE (%)': mape
+        'MAPE (%)': mape
     }
 
     # --- Tampilan Evaluasi (MAE, RMSE, MAPE) ---
@@ -273,4 +273,4 @@ else:
     st.subheader("Evaluasi Model (BiLSTM)")
     st.dataframe(eval_df, use_container_width=True)
     # Menengahkan teks di tabel evaluasi
-    st.write(eval_df.style.set_properties(**{'text-align': 'center'}))  # Menengahkan teks di kolom tabel
+    #st.write(eval_df.style.set_properties(**{'text-align': 'center'}))  # Menengahkan teks di kolom tabel
