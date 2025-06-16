@@ -102,7 +102,7 @@ full_sector_name = sector
 
 # Pilih provinsi dari sidebar
 provinsi_list = combined_df['Satuan PLN/Provinsi'].unique()  # Ambil daftar provinsi yang tersedia
-provinsi = st.sidebar.selectbox('Pilih Satuan PLN/Provinsi', ['Semua Daerah'] + list(provinsi_list))  # Menambahkan pilihan untuk seluruh daerah
+provinsi = st.sidebar.selectbox('Pilih Satuan/Provinsi', ['Semua Daerah'] + list(provinsi_list))  # Menambahkan pilihan untuk seluruh daerah
 
 # Menampilkan tampilan antara Tabel atau Grafik
 display_option = st.radio("Pilih Tampilan", ("Tabel", "Grafik"))
