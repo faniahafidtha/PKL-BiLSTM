@@ -100,9 +100,11 @@ sector = st.sidebar.selectbox('Pilih Sektor', [sector_mapping[s] for s in sector
 # Menampilkan nama sektor yang lengkap menggunakan pemetaan
 full_sector_name = sector
 
-# Pilih provinsi dari sidebar
-provinsi_list = combined_df['Satuan PLN/Provinsi'].unique()  # Ambil daftar provinsi yang tersedia
-provinsi = st.sidebar.selectbox('Pilih Satuan/Provinsi', ['Semua Daerah'] + list(provinsi_list))  # Menambahkan pilihan untuk seluruh daerah
+# Ambil provinsi yang ada pada tahun 2024
+provinsi_2024 = combined_df[combined_df['Tahun'] == 2024]['Satuan PLN/Provinsi'].unique()
+
+# Pilih provinsi berdasarkan data tahun 2024
+provinsi = st.sidebar.selectbox('Pilih Satuan/Provinsi', ['Semua Daerah'] + list(provinsi_2024))
 
 # Menampilkan tampilan antara Tabel atau Grafik
 display_option = st.radio("Pilih Tampilan", ("Tabel", "Grafik"))
