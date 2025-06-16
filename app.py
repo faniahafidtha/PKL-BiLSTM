@@ -199,6 +199,7 @@ else:
     # --- Visualisasi Grafik ---
     st.subheader(f"Grafik Prediksi Konsumsi Listrik Sektor: {full_sector_name}")
 
+
     plt.figure(figsize=(10, 6))
 
     actual_years = data_to_use['Tahun'].values[n_steps:]
@@ -238,7 +239,8 @@ else:
     result_df['Tahun'] = result_df['Tahun'].astype(str)
 
     st.subheader(f"Tabel Prediksi Konsumsi Listrik Sektor: {full_sector_name}")
-    st.write(result_df)
+    st.dataframe(result_df, use_container_width=True)
+    #st.write(result_df)
 
     # Tampilkan tabel untuk data aktual dan prediksi masa depan
     future_result_df = pd.DataFrame({
@@ -248,7 +250,8 @@ else:
     future_result_df['Tahun'] = future_result_df['Tahun'].astype(str)
 
     st.subheader(f"Tabel Prediksi Masa Depan (2025-2030) untuk Sektor: {full_sector_name} (Gwh)")
-    st.write(future_result_df)
+    st.dataframe(future_result_df, use_container_width=True)
+    #st.write(future_result_df)
     
     # Evaluasi dengan kesalahan terukur
     min_val, max_val = data_to_use[sector_key].min(), data_to_use[sector_key].max()
