@@ -196,28 +196,6 @@ else:
         'future_preds': future_preds
     }
 
-    # Evaluasi dengan kesalahan terukur
-    min_val, max_val = data_to_use[sector_key].min(), data_to_use[sector_key].max()
-    range_val = max_val - min_val if max_val != min_val else 1
-
-    mae = mean_absolute_error(actual, predicted) / range_val
-    rmse = np.sqrt(mean_squared_error(actual, predicted)) / range_val
-    mape = np.mean(np.abs((actual - predicted) / actual)) * 100
-
-    evaluations_bilstm_2030[sector_key] = {
-        'MAE': mae,
-        'RMSE': rmse,
-        'MAPE (%)': mape
-    }
-
-    # --- Tampilan Evaluasi (MAE, RMSE, MAPE) ---
-    eval_df = pd.DataFrame(evaluations_bilstm_2030).T
-    eval_df = eval_df.rename(index={sector_key: full_sector_name})  # Menambah nama sektor lengkap
-    st.subheader("Evaluasi Model (BiLSTM)")
-
-    # Menengahkan teks di tabel evaluasi
-    st.write(eval_df.style.set_properties(**{'text-align': 'center'}))  # Menengahkan teks di kolom tabel
-
     # --- Visualisasi Grafik ---
     st.subheader(f"Grafik Prediksi Konsumsi Listrik Sektor: {full_sector_name}")
 
@@ -271,3 +249,25 @@ else:
 
     st.subheader(f"Tabel Prediksi Masa Depan (2025-2030) untuk Sektor: {full_sector_name} (Gwh)")
     st.write(future_result_df)
+    
+    # Evaluasi dengan kesalahan terukur
+    min_val, max_val = data_to_use[sector_key].min(), data_to_use[sector_key].max()
+    range_val = max_val - min_val if max_val != min_val else 1
+
+    mae = mean_absolute_error(actual, predicted) / range_val
+    rmse = np.sqrt(mean_squared_error(actual, predicted)) / range_val
+    mape = np.mean(np.abs((actual - predicted) / actual)) * 100
+
+    evaluations_bilstm_2030[sector_key] = {
+        'MAE': mae,
+        'RMSE': rmse,
+        'MAPE (%)': mape
+    }
+
+    # --- Tampilan Evaluasi (MAE, RMSE, MAPE) ---
+    eval_df = pd.DataFrame(evaluations_bilstm_2030).T
+    eval_df = eval_df.rename(index={sector_key: full_sector_name})  # Menambah nama sektor lengkap
+    st.subheader("Evaluasi Model (BiLSTM)")
+
+    # Menengahkan teks di tabel evaluasi
+    st.write(eval_df.style.set_properties(**{'text-align': 'center'}))  # Menengahkan teks di kolom tabel
