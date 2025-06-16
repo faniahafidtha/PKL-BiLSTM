@@ -133,7 +133,8 @@ if display_option == "Tabel":
 
     # Rename kolom
     table_df = table_df.rename(columns={sector_key: f'{full_sector_name} (GWh)'})
-    st.dataframe(table_df)
+    st.dataframe(table_df, use_container_width=True)
+
 
 # --- Jika memilih Grafik ---
 else:
