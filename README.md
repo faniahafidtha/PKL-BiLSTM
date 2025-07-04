@@ -8,12 +8,9 @@ Selamat datang di Proyek Prediksi Konsumsi Listrik. Website ini dibuat untuk mem
 
 Untuk mendapatkan hasil prediksi, ikuti langkah-langkah mudah berikut:
 
-1.  **Buka Halaman Prediksi**: Akses halaman utama aplikasi di mana Anda akan melihat formulir.
+1.  **Buka Halaman Prediksi**: Akses halaman utama aplikasi disaat akan melihat formulir.
 
-2.  **Masukkan Data**: Isi semua kolom yang tersedia pada formulir. Pastikan semua data yang dimasukkan sudah benar.
-    * *Contoh Kolom 1:* (Jelaskan kolom pertama, misal: "Masukkan jumlah pelanggan")
-    * *Contoh Kolom 2:* (Jelaskan kolom kedua, misal: "Pilih kategori daya")
-    * *(Tambahkan penjelasan untuk kolom lainnya jika ada)*
+2.  **Masukkan Data**: Input data prediksi historis dalam bentuk xlsx.
 
 3.  **Klik Tombol "Prediksi"**: Setelah semua data terisi, klik tombol **Prediksi** atau **Submit**.
 
