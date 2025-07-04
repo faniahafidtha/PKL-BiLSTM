@@ -1,76 +1,139 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow import keras
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Bidirectional, LSTM, Dense
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout, Input, Bidirectional
+from keras.callbacks import EarlyStopping
+import matplotlib.pyplot as plt
+import random
+import math
+import io
 
+# --- Konfigurasi dan Fungsi-Fungsi dari Notebook ---
 
-# --- Mengatur konfigurasi halaman Streamlit (judul dan ikon) ---
-st.set_page_config(
-    page_title="Prediksi Konsumsi Listrik",  # Judul halaman di tab browser
-    page_icon="⚡",  # Ikon halaman (opsional, bisa menggunakan emoji atau path ke gambar)
-    layout="centered",  # Opsi layout (default: "centered" atau "wide")
-)
+def set_seeds(seed_value=42):
+    np.random.seed(seed_value)
+    random.seed(seed_value)
+    tf.random.set_seed(seed_value)
 
-# --- Styling CSS untuk warna background dan sidebar ---
-st.markdown("""
-    <style>
-    body {
-        background-color: #ffffff;  /* Warna putih untuk halaman utama */
-    }
-    .sidebar .sidebar-content {
-        background-color: #003366;  /* Biru dongker untuk sidebar */
-    }
-    .sidebar .sidebar-header {
-        font-size: 1.5em;
-        color: white;
-    }
-    </style>
-""", unsafe_allow_html=True)
+def clean_data(excel_file):
+    xls = pd.ExcelFile(excel_file)
+    all_dataframes = []
+    sheet_names = [name for name in xls.sheet_names if str(name).isdigit()]
+    for sheet_name in sheet_names:
+        df = pd.read_excel(xls, sheet_name=sheet_name)
+        df['Tahun'] = int(sheet_name)
+        all_dataframes.append(df)
+    df_kotor = pd.concat(all_dataframes, ignore_index=True)
 
+    df_cleaned = df_kotor.copy()
+    df_cleaned.columns = df_cleaned.columns.str.strip()
+    nama_mapping = {'Jakarta Raya & Tangerang': 'Jakarta Raya'}
+    if 'Satuan PLN/Provinsi' in df_cleaned.columns:
+        df_cleaned['Satuan PLN/Provinsi'] = df_cleaned['Satuan PLN/Provinsi'].replace(nama_mapping)
+    
+    sektor_cols = ['Rumah Tangga', 'Industri', 'Bisnis', 'Sosial', 'GKP', 'PJU']
+    for col in sektor_cols:
+        if col in df_cleaned.columns:
+            df_cleaned[col] = pd.to_numeric(df_cleaned[col].astype(str).str.replace(',', '', regex=False), errors='coerce')
+    
+    df_cleaned = df_cleaned.fillna(0)
+    df_final = df_cleaned.groupby(['Tahun', 'Satuan PLN/Provinsi'])[sektor_cols].sum().reset_index()
+    return df_final, sektor_cols
 
-# --- Membaca dan memproses data ---
-file_path = 'PLN 15-24.xlsx'  # Ganti dengan path file yang sesuai
-years = range(2014, 2025)
+def create_stacked_bilstm_model(n_steps):
+    model = Sequential([
+        Input(shape=(n_steps, 1)),
+        Bidirectional(LSTM(50, activation='relu', return_sequences=True)),
+        Dropout(0.2),
+        Bidirectional(LSTM(50, activation='relu')),
+        Dropout(0.2),
+        Dense(25, activation='relu'),
+        Dense(1)
+    ])
+    model.compile(optimizer='adam', loss='mse')
+    return model
 
-# Container untuk semua data
-all_data = []
+@st.cache_resource(show_spinner="Melatih model untuk semua sektor...")
+def get_all_models_and_scalers(_df_cleaned, _sektor_cols):
+    set_seeds()
+    data_nasional = _df_cleaned.groupby('Tahun')[_sektor_cols].sum().reset_index()
+    
+    best_n_steps = 7
+    best_split_ratio = 0.8
+    train_size_final = int(len(data_nasional) * best_split_ratio)
+    
+    all_models, all_scalers = {}, {}
+    early_stopping_val = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
 
-for year in years:
-    # Membaca sheet
-    df = pd.read_excel(file_path, sheet_name=str(year))
+    for sektor in _sektor_cols:
+        scaler_final = MinMaxScaler()
+        scaler_final.fit(data_nasional.head(train_size_final)[[sektor]])
+        full_s = scaler_final.transform(data_nasional[[sektor]])
+        
+        X_final, y_final = [], []
+        for i in range(len(full_s) - best_n_steps):
+            X_final.append(full_s[i:i+best_n_steps])
+            y_final.append(full_s[i+best_n_steps])
+        
+        if not X_final: continue
+        X_final, y_final = np.array(X_final), np.array(y_final)
+        
+        train_idx_final = len(data_nasional.head(train_size_final)) - best_n_steps
+        if train_idx_final <= 0: continue
+        
+        X_train, X_test = X_final[:train_idx_final], X_final[train_idx_final:]
+        y_train, y_test = y_final[:train_idx_final], y_final[train_idx_final:]
+        if len(X_test) == 0: continue
+        
+        model_final = create_stacked_bilstm_model(best_n_steps)
+        model_final.fit(X_train, y_train, epochs=500, verbose=0, validation_data=(X_test, y_test), callbacks=[early_stopping_val])
+        
+        all_models[sektor] = model_final
+        all_scalers[sektor] = scaler_final
+        
+    return data_nasional, all_models, all_scalers, best_n_steps
 
-    # Bersihkan nama kolom
-    df.columns = df.columns.str.strip()
+def make_future_predictions(data_nasional, all_models, all_scalers, best_n_steps, sektor_terpilih, target_year):
+    future_data = data_nasional.copy()
+    latest_year = future_data['Tahun'].max()
+    
+    for year_to_predict in range(latest_year + 1, target_year + 1):
+        new_row = {'Tahun': year_to_predict}
+        for sektor in sektor_terpilih:
+            if sektor in all_models:
+                model, scaler = all_models[sektor], all_scalers[sektor]
+                
+                input_data = future_data[sektor].values[-best_n_steps:].reshape(-1, 1)
+                scaled_input = scaler.transform(input_data).reshape(1, best_n_steps, 1)
+                
+                pred_s = model.predict(scaled_input, verbose=0)
+                pred_gwh = scaler.inverse_transform(pred_s)[0, 0]
+                new_row[sektor] = pred_gwh
+            
+        future_data = pd.concat([future_data, pd.DataFrame([new_row])], ignore_index=True)
+        
+    return future_data
 
-    # Pastikan semua kolom selain 'Satuan PLN/Provinsi' adalah numerik
-    for col in df.columns:
-        if col != 'Satuan PLN/Provinsi':
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+@st.cache_data
+def to_excel(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Prediksi')
+    processed_data = output.getvalue()
+    return processed_data
 
-    # Isi NaN dengan 0
-    df = df.fillna(0)
+# --- Antarmuka Aplikasi Streamlit ---
 
-    # Tambahkan kolom 'Tahun'
-    df['Tahun'] = year
-    all_data.append(df)
+st.set_page_config(layout="wide")
+st.title("📊 Aplikasi Prediksi Konsumsi Listrik PLN")
+st.write("Aplikasi ini menggunakan model Bi-LSTM untuk memprediksi konsumsi listrik per sektor berdasarkan data historis.")
 
-# Gabungkan semua tahun
-combined_df = pd.concat(all_data, ignore_index=True)
-
-# Grupkan data berdasarkan 'Tahun'
-df_national = combined_df.groupby('Tahun')[[ 
-    'Rumah Tangga', 'Industri', 'Bisnis', 'Sosial', 'GKP', 'PJU'
-]].sum().reset_index()
-
-# Menampilkan data sektor
-sectors = ['Rumah Tangga', 'Industri', 'Bisnis', 'Sosial', 'GKP', 'PJU']
-
-# Pemetaan sektor (singkatan ke nama lengkap)
-sector_mapping = {
+# ===== BAGIAN YANG DIPERBARUI (KAMUS LABEL) =====
+SEKTOR_MAPPING = {
     'Rumah Tangga': 'Rumah Tangga',
     'Industri': 'Industri',
     'Bisnis': 'Bisnis',
@@ -78,199 +141,138 @@ sector_mapping = {
     'GKP': 'Gedung Kantor Pemerintah',
     'PJU': 'Penerangan Jalan Umum'
 }
+# ===============================================
 
-# --- Fungsi untuk membuat urutan data ---
-def create_sequences(data, n_steps=3):
-    X, y = [], []
-    for i in range(len(data) - n_steps):
-        X.append(data[i:i+n_steps])
-        y.append(data[i+n_steps])
-    return np.array(X), np.array(y)
+uploaded_file = st.file_uploader("Unggah file Excel data historis PLN (.xlsx)", type=["xlsx"])
 
-# --- Fungsi untuk format ribuan dan desimal (dengan koma sebagai pemisah desimal) ---
-def format_thousands_and_decimal_vectorized(arr):
-    return np.array([f"{x:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".") for x in arr])
+if uploaded_file is not None:
+    try:
+        df_cleaned, sektor_cols = clean_data(uploaded_file)
+        data_nasional_ori, all_models, all_scalers, best_n_steps = get_all_models_and_scalers(df_cleaned, sektor_cols)
+        
+        st.sidebar.header("⚙️ Opsi Prediksi")
+        
+        latest_year = data_nasional_ori['Tahun'].max()
+        target_year = st.sidebar.number_input(
+            "Masukkan Tahun Prediksi:", 
+            min_value=latest_year + 1, 
+            max_value=latest_year + 20, 
+            value=latest_year + 1,
+            step=1
+        )
+        
+        predict_all = st.sidebar.checkbox("Prediksi Semua Sektor", value=True)
+        
+        # ===== BAGIAN YANG DIPERBARUI (PILIHAN MENU) =====
+        sektor_terpilih_display = []
+        if not predict_all:
+            display_options = [SEKTOR_MAPPING[sektor] for sektor in sektor_cols]
+            sektor_terpilih_display = st.sidebar.multiselect(
+                "Pilih Sektor untuk Prediksi:",
+                options=display_options,
+                default=display_options[0]
+            )
+        # ===============================================
+            
+        if st.sidebar.button("🚀 Buat Prediksi", use_container_width=True):
+            
+            # ===== BAGIAN YANG DIPERBARUI (TERJEMAHKAN PILIHAN) =====
+            if predict_all:
+                sektor_terpilih = sektor_cols
+            else:
+                # Buat kamus terbalik untuk menerjemahkan pilihan pengguna
+                REVERSE_SEKTOR_MAPPING = {v: k for k, v in SEKTOR_MAPPING.items()}
+                sektor_terpilih = [REVERSE_SEKTOR_MAPPING[display] for display in sektor_terpilih_display]
+            # =======================================================
 
-# --- Tampilan Streamlit ---
-st.title("Prediksi Konsumsi Listrik per Sektor (BiLSTM)")
+            if not sektor_terpilih:
+                st.warning("Silakan pilih minimal satu sektor.")
+            else:
+                with st.spinner(f"Membuat prediksi hingga tahun {target_year}..."):
+                    future_predictions_df = make_future_predictions(data_nasional_ori, all_models, all_scalers, best_n_steps, sektor_terpilih, target_year)
+                
+                st.header(f"📈 Hasil Prediksi Tahun {target_year}")
 
-# Pilih sektor dari sidebar
-sector = st.sidebar.selectbox('Pilih Sektor', [sector_mapping[s] for s in sectors])
+                n_sektor = len(sektor_terpilih)
+                n_cols = 2 if n_sektor > 1 else 1
+                n_rows = math.ceil(n_sektor / n_cols)
+                
+                fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 6 * n_rows), squeeze=False)
+                axes = axes.flatten()
+                
+                for i, sektor in enumerate(sektor_terpilih):
+                    ax = axes[i]
+                    display_name = SEKTOR_MAPPING.get(sektor, sektor) # Dapatkan nama tampilan
+                    ax.plot(data_nasional_ori['Tahun'], data_nasional_ori[sektor], marker='o', linestyle='-', label='Data Aktual')
+                    pred_years = future_predictions_df[future_predictions_df['Tahun'] > latest_year]
+                    ax.plot(pred_years['Tahun'], pred_years[sektor], 'o--', color='orange', label='Prediksi Masa Depan')
+                    target_pred_val = future_predictions_df[future_predictions_df['Tahun'] == target_year][sektor].values[0]
+                    ax.plot(target_year, target_pred_val, 'ro', markersize=10, label=f'Prediksi {target_year}')
+                    ax.set_title(f"Tren dan Prediksi Sektor {display_name}") # Gunakan nama tampilan di judul
+                    ax.legend()
+                    ax.ticklabel_format(style='plain', axis='y')
+                    ax.set_ylabel("Konsumsi (GWh)")
+                    ax.set_xlabel("Tahun")
+                
+                for i in range(n_sektor, len(axes)):
+                    fig.delaxes(axes[i])
+                
+                plt.tight_layout()
+                st.pyplot(fig)
 
-# Menampilkan nama sektor yang lengkap menggunakan pemetaan
-full_sector_name = sector
+                st.subheader("Tabel Prediksi Nasional")
+                
+                target_year_data = future_predictions_df.loc[future_predictions_df['Tahun'] == target_year]
+                final_predictions = target_year_data[sektor_terpilih].T.reset_index()
+                final_predictions.columns = ['Sektor', f'Prediksi {target_year} (GWh)']
+                # Ganti nama sektor di tabel hasil
+                final_predictions['Sektor'] = final_predictions['Sektor'].map(SEKTOR_MAPPING)
 
-# Ambil provinsi yang ada pada tahun 2024
-provinsi_2024 = combined_df[combined_df['Tahun'] == 2024]['Satuan PLN/Provinsi'].unique()
+                total_prediksi = final_predictions[f'Prediksi {target_year} (GWh)'].sum()
+                
+                st.dataframe(final_predictions.style.format({f'Prediksi {target_year} (GWh)': '{:,.2f}'}), use_container_width=True)
+                st.metric(label=f"Total Prediksi untuk Sektor Terpilih ({target_year})", value=f"{total_prediksi:,.2f} GWh")
 
-# Pilih provinsi berdasarkan data tahun 2024
-provinsi = st.sidebar.selectbox('Pilih Satuan/Provinsi', ['Semua Daerah'] + list(provinsi_2024))
+                with st.expander("Lihat Prediksi Detail per Provinsi dan Unduh Hasil"):
+                    all_province_results = []
+                    provinsi_terakhir = df_cleaned[df_cleaned['Tahun'] == latest_year]['Satuan PLN/Provinsi'].unique()
+                    
+                    for provinsi in provinsi_terakhir:
+                        prov_result = {'Provinsi': provinsi}
+                        for sektor in sektor_terpilih:
+                            input_data_prov = df_cleaned[df_cleaned['Satuan PLN/Provinsi'] == provinsi].sort_values('Tahun')
+                            model, scaler = all_models[sektor], all_scalers[sektor]
+                            if len(input_data_prov) < best_n_steps:
+                                pred_val = np.nan
+                            else:
+                                future_prov_data = input_data_prov.copy()
+                                for year_to_predict_prov in range(latest_year + 1, target_year + 1):
+                                    input_sequence = future_prov_data[sektor].values[-best_n_steps:].reshape(-1, 1)
+                                    scaled_input = scaler.transform(input_sequence).reshape(1, best_n_steps, 1)
+                                    pred_s = model.predict(scaled_input, verbose=0)
+                                    pred_gwh = scaler.inverse_transform(pred_s)[0, 0]
+                                    new_prov_row = {'Tahun': year_to_predict_prov, sektor: pred_gwh, 'Satuan PLN/Provinsi': provinsi}
+                                    future_prov_data = pd.concat([future_prov_data, pd.DataFrame([new_prov_row])], ignore_index=True)
+                                pred_val = future_prov_data[future_prov_data['Tahun'] == target_year][sektor].values[0]
 
-# Menampilkan tampilan antara Tabel atau Grafik
-display_option = st.radio("Pilih Tampilan", ("Tabel", "Grafik"))
+                            prov_result[sektor] = pred_val
+                        all_province_results.append(prov_result)
+                    
+                    df_summary_provinsi = pd.DataFrame(all_province_results).dropna()
+                    
+                    # Ubah nama kolom sebelum ditampilkan dan diunduh
+                    df_summary_provinsi_display = df_summary_provinsi.rename(columns=SEKTOR_MAPPING)
+                    
+                    st.dataframe(df_summary_provinsi_display.style.format(formatter="{:,.2f}", subset=list(SEKTOR_MAPPING.values())), use_container_width=True)
 
-# Tampilkan data sektor yang dipilih, termasuk kolom 'Satuan PLN/Provinsi'
-# Mengambil sektor yang sesuai dengan nama lengkap
-sector_key = list(sector_mapping.keys())[list(sector_mapping.values()).index(full_sector_name)]
-sector_data = combined_df[['Tahun', 'Satuan PLN/Provinsi', sector_key]]
+                    df_xlsx = to_excel(df_summary_provinsi_display)
+                    st.download_button(
+                        label="📥 Unduh Tabel Prediksi per Provinsi (.xlsx)",
+                        data=df_xlsx,
+                        file_name=f'prediksi_provinsi_{target_year}.xlsx',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    )
 
-# --- Data untuk Provinsi yang dipilih ---
-if provinsi != 'Semua Daerah':
-    provinsi_data = combined_df[combined_df['Satuan PLN/Provinsi'] == provinsi]
-else:
-    provinsi_data = combined_df
-
-# --- Jika memilih Tabel ---
-if display_option == "Tabel":
-    st.write(f"Data Sektor: {full_sector_name}")
-    
-    # Tampilkan tabel prediksi berdasarkan sektor dan provinsi
-    table_df = provinsi_data[['Tahun', 'Satuan PLN/Provinsi', sector_key]].copy()
-
-    # Format nilai untuk ribuan dan desimal
-    table_df["Tahun"] = table_df["Tahun"].astype(str)
-    table_df[sector_key] = table_df[sector_key].apply(lambda x: format_thousands_and_decimal_vectorized(np.array([x]))[0])
-
-    # Rename kolom
-    table_df = table_df.rename(columns={sector_key: f'{full_sector_name} (GWh)'})
-    st.dataframe(table_df, use_container_width=True)
-
-
-# --- Jika memilih Grafik ---
-else:
-    # --- Model BiLSTM dan Prediksi ---
-    n_steps = 3
-    n_future = 6  # Prediksi 2025–2030
-    future_years = list(range(2025, 2025 + n_future))
-
-    predictions_bilstm_2030 = {}
-    evaluations_bilstm_2030 = {}
-
-    # --- Proses prediksi untuk sektor yang dipilih ---
-    scaler = MinMaxScaler()
-    
-    # Jika memilih provinsi, hanya gunakan data provinsi tersebut
-    if provinsi != 'Semua Daerah':
-        data_to_use = provinsi_data
-    else:
-        data_to_use = df_national  # Gunakan data nasional jika 'Semua Daerah' dipilih
-
-    scaled_data = scaler.fit_transform(data_to_use[[sector_key]])
-
-    # Persiapkan urutan data
-    X, y = create_sequences(scaled_data, n_steps)
-    X = X.reshape((X.shape[0], X.shape[1], 1))
-
-    # Definisikan dan latih model BiLSTM
-    model = Sequential([
-        Bidirectional(LSTM(64, activation='relu'), input_shape=(n_steps, 1)),
-        Dense(1)
-    ])
-    model.compile(optimizer='adam', loss='mse')
-    model.fit(X, y, epochs=200, verbose=0)
-
-    # Prediksi untuk data historis
-    predicted_scaled = model.predict(X, verbose=0)
-    predicted = scaler.inverse_transform(predicted_scaled).flatten()
-
-    # Data aktual (ground truth)
-    actual = scaler.inverse_transform(y.reshape(-1, 1)).flatten()
-
-    # Prediksi untuk 2025–2030 (nilai masa depan)
-    future_preds = []
-    last_input = scaled_data[-n_steps:].reshape((1, n_steps, 1))
-
-    for _ in range(n_future):
-        future_scaled = model.predict(last_input, verbose=0)
-        future_actual = scaler.inverse_transform(future_scaled)[0, 0]
-        future_preds.append(future_actual)
-
-        future_scaled_reshaped = future_scaled.reshape(1, 1, 1)
-        last_input = np.concatenate((last_input[:, 1:, :], future_scaled_reshaped), axis=1)
-
-    # Simpan prediksi
-    predictions_bilstm_2030[sector_key] = {
-        'actual': actual,
-        'predicted': predicted,
-        'future_years': future_years,
-        'future_preds': future_preds
-    }
-
-    # --- Visualisasi Grafik ---
-    st.subheader(f"Grafik Prediksi Konsumsi Listrik Sektor: {full_sector_name}")
-
-
-    plt.figure(figsize=(10, 6))
-
-    actual_years = data_to_use['Tahun'].values[n_steps:]
-    future_years = predictions_bilstm_2030[sector_key]['future_years']
-
-    actual = predictions_bilstm_2030[sector_key]['actual']
-    predicted = predictions_bilstm_2030[sector_key]['predicted']
-    future_preds = predictions_bilstm_2030[sector_key]['future_preds']
-
-    # Plot data aktual
-    plt.plot(actual_years, actual, label='Aktual', color='blue', marker='o')
-
-    # Plot prediksi model pada data historis
-    plt.plot(actual_years, predicted, label='Prediksi (hist)', color='orange', marker='x')
-
-    # Plot prediksi masa depan (2025–2030)
-    plt.plot(future_years, future_preds, label='Prediksi 2025–2030', color='red', marker='s')
-
-    # Garis vertikal untuk menandai 2024
-    plt.axvline(2024, linestyle='--', color='gray', label='Tahun 2024')
-
-    plt.title(f"{full_sector_name}")
-    plt.xlabel("Tahun")
-    plt.ylabel("Nilai Konsumsi")
-    plt.grid(True)
-    plt.legend()
-
-    # Tampilkan grafik
-    st.pyplot(plt)
-
-    # Tampilkan tabel untuk data aktual dan prediksi
-    result_df = pd.DataFrame({
-        'Tahun': actual_years.astype(int),
-        'Aktual (Gwh)': format_thousands_and_decimal_vectorized(actual),
-        'Prediksi (Gwh)': format_thousands_and_decimal_vectorized(predicted)
-    })
-    result_df['Tahun'] = result_df['Tahun'].astype(str)
-
-    st.subheader(f"Tabel Prediksi Konsumsi Listrik Sektor: {full_sector_name}")
-    st.dataframe(result_df, use_container_width=True)
-    #st.write(result_df)
-
-    # Tampilkan tabel untuk data aktual dan prediksi masa depan
-    future_result_df = pd.DataFrame({
-        'Tahun': np.array(future_years).astype(int),
-        'Prediksi Masa Depan (Gwh)': format_thousands_and_decimal_vectorized(future_preds)
-    })
-    future_result_df['Tahun'] = future_result_df['Tahun'].astype(str)
-
-    st.subheader(f"Tabel Prediksi Masa Depan (2025-2030) untuk Sektor: {full_sector_name} (Gwh)")
-    st.dataframe(future_result_df, use_container_width=True)
-    #st.write(future_result_df)
-    
-    # Evaluasi dengan kesalahan terukur
-    min_val, max_val = data_to_use[sector_key].min(), data_to_use[sector_key].max()
-    range_val = max_val - min_val if max_val != min_val else 1
-
-    mae = mean_absolute_error(actual, predicted) / range_val
-    rmse = np.sqrt(mean_squared_error(actual, predicted)) / range_val
-    mape = np.mean(np.abs((actual - predicted) / actual)) * 100
-
-    evaluations_bilstm_2030[sector_key] = {
-        'MAE': mae,
-        'RMSE': rmse,
-        'MAPE (%)': mape
-    }
-
-    # --- Tampilan Evaluasi (MAE, RMSE, MAPE) ---
-    eval_df = pd.DataFrame(evaluations_bilstm_2030).T
-    eval_df = eval_df.rename(index={sector_key: full_sector_name})  # Menambah nama sektor lengkap
-    st.subheader("Evaluasi Model (BiLSTM)")
-    st.dataframe(eval_df, use_container_width=True)
-    # Menengahkan teks di tabel evaluasi
-    #st.write(eval_df.style.set_properties(**{'text-align': 'center'}))  # Menengahkan teks di kolom tabel
+    except Exception as e:
+        st.error(f"Terjadi kesalahan saat memproses file: {e}")
+        st.exception(e) # Menampilkan detail error untuk debugging
