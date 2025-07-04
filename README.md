@@ -8,7 +8,7 @@ Selamat datang di Proyek Prediksi Konsumsi Listrik. Website ini dibuat untuk mem
 
 Untuk mendapatkan hasil prediksi, ikuti langkah-langkah mudah berikut:
 
-1.  **Buka Halaman Prediksi**: Akses halaman utama aplikasi disaat akan melihat formulir.
+1.  **Buka Halaman Prediksi**: Akses halaman utama aplikasi.
 
 2.  **Masukkan Data**: Input data prediksi historis dalam bentuk xlsx.
 
